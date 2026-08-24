@@ -20,7 +20,17 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Projeto Digital - Postes", layout="wide")
 st.markdown(
-    "<style>div.block-container{padding-top:1rem;padding-bottom:0}</style>",
+    """
+    <style>
+    #MainMenu, header, footer {visibility: hidden; height: 0;}
+    div.block-container {padding: 0; margin: 0; max-width: 100%;}
+    [data-testid="stIFrame"], [data-testid="stIFrame"] iframe {
+        height: 100vh !important;
+        width: 100% !important;
+        border: 0;
+    }
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
@@ -40,4 +50,4 @@ if CSV_PATH.exists():
 else:
     st.warning(f"cod_ids_processados.csv nao encontrado em {BASE_DIR} -- os postes ja fotografados nao vao aparecer pintados de 'Robo'.")
 
-components.html(html, height=1400, scrolling=True)
+components.html(html, height=1000, scrolling=True)
