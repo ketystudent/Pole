@@ -121,6 +121,11 @@ function upsertPoste_(sh, linha) {
   const dados = sh.getDataRange().getValues();
   for (let i = 1; i < dados.length; i++) {
     if (String(dados[i][0]) === linha.cod_id && String(dados[i][1]) === linha.cidade && String(dados[i][2]) === linha.run_id) {
+      // regra: um poste ja marcado (por qualquer pessoa, ou pelo Robo) nunca
+      // e sobrescrito por outra pessoa -- so a mesma pessoa pode "regravar"
+      // (ex.: atualizar so o data_hora dela mesma).
+      const donoAtual = String(dados[i][3] || '');
+      if (donoAtual && donoAtual !== linha.nome) return;
       sh.getRange(i + 1, 1, 1, 6).setValues([[linha.cod_id, linha.cidade, linha.run_id, linha.nome, linha.cor, linha.data_hora]]);
       return;
     }
