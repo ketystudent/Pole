@@ -24,15 +24,16 @@ import traceback
 
 from pano import (
     get_pano_meta, fetch_panorama, remove_watermark_band,
-    bearing_deg, auto_find_pole_yaw_constrained, refine_yaw_for_centering,
+    bearing_deg, yaw_from_bearing, auto_find_pole_yaw_constrained, refine_yaw_for_centering,
     equirect_to_perspective,
 )
 from routing import dest_dir_for, is_esquina, all_processed_ids
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(HERE)
 MAPDATA = os.path.join(HERE, "mapdata.json")
-ESQUINA_INDEX = os.path.join(os.path.dirname(HERE), "esquina_index.csv")
-LOG_DIR = os.path.dirname(HERE)
+ESQUINA_INDEX = os.path.join(PROJECT_ROOT, "BASE DE DADOS", "esquina_index.csv")
+LOG_DIR = os.path.join(PROJECT_ROOT, "RELATORIOS")
 
 PITCH, FOV = 8, 80
 OUT_W, OUT_H = 1000, 1333
@@ -81,7 +82,11 @@ def process_one(cod_id, addr, lat, lon, tipo, log):
             log.append(dict(cod_id=cod_id, tipo=tipo, endereco=addr, resultado="SEM_COBERTURA_OU_SEM_POSICAO"))
             return False
 
-        hint_yaw = bearing_deg(meta["lat"], meta["lon"], lat, lon)
+        # bearing_deg() gives a true-north compass bearing; yaw_from_bearing()
+        # converts it into the panorama's own (non-north-aligned) pixel frame --
+        # see pano.yaw_from_bearing docstring, bug found+fixed 22/ago.
+        raw_bearing = bearing_deg(meta["lat"], meta["lon"], lat, lon)
+        hint_yaw = yaw_from_bearing(raw_bearing, meta.get("heading"))
         pano_img = fetch_panorama(meta["panoid"], meta["levels"], meta["tile_size"], zoom=4)
         pano_img, wm_hits = remove_watermark_band(pano_img)
 
@@ -98,7 +103,7 @@ def process_one(cod_id, addr, lat, lon, tipo, log):
         name = f"COD ID_{cod_id}" + (f" ({note})" if note else "") + ".jpg"
         crop.save(os.path.join(dest, name), quality=92)
 
-        pasta = os.path.basename(dest) if os.path.basename(dest) != "POSTES UTILIZADOS" else "REVISAO_AUTOMATICA"
+        pasta = os.path.basename(dest)  # dest_dir_for() sempre devolve uma fila "... - REVISAO"
         log.append(dict(
             cod_id=cod_id, tipo=tipo, endereco=addr, confianca=confidence,
             resultado="OK" if centered_ok else "OK_VERIFICAR_CENTRALIZACAO",
@@ -154,6 +159,7 @@ def main():
                 n += 1
 
     ts = time.strftime("%Y%m%d_%H%M%S")
+    os.makedirs(LOG_DIR, exist_ok=True)
     out_csv = os.path.join(LOG_DIR, f"lote_log_{ts}.csv")
     fields = ["cod_id", "tipo", "endereco", "confianca", "resultado", "pasta", "twin_edge", "wire_count",
               "hint_bearing", "yaw", "offset_centro_pct", "watermark_hits", "segundos"]
@@ -165,7 +171,7 @@ def main():
     from collections import Counter
     print(f"\nconcluido: {dict(Counter(r.get('confianca', 'erro') for r in log))}")
     print("log salvo em", out_csv)
-    print("LEMBRETE: tudo caiu em fila de revisao. Nada foi pra POSTES UTILIZADOS direto.")
+    print("LEMBRETE: tudo caiu numa fila '... - REVISAO'. Nada foi pra uma pasta '... - OK' direto.")
 
 
 if __name__ == "__main__":

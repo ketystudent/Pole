@@ -1,5 +1,6 @@
-import json, math, collections, re, unicodedata
-HTML=r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\Projeto_Digital_Ante.html"
+import json, math, collections, re, unicodedata, os
+ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HTML=os.path.join(ROOT,"BASE DE DADOS","Projeto_Digital_Ante.html")
 with open(HTML,encoding="utf-8") as f:
     for line in f:
         if line.startswith("const D="):
@@ -75,14 +76,13 @@ for RPROX,RCRUZ in COMBOS:
     matches[key]=ids
 
 # already processed --------------------------------------------------
-import os
-d=r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\POSTES UTILIZADOS"
+d=os.path.join(ROOT,"POSTES UTILIZADOS")
 proc=set(); rev=set()
 for root,_,fs in os.walk(d):
     for f in fs:
         m=re.search(r"COD ID_(\d+)",f)
         if not m: continue
-        (rev if "PRECISA REVISAO" in root else proc).add(m.group(1))
+        (rev if " - REVISAO" in root else proc).add(m.group(1))
 
 # output ---------------------------------------------------------------
 util_by_id={p["cod_id"]:p for p in util}

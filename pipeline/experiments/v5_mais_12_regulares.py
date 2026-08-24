@@ -5,6 +5,7 @@ revisao -- nada vai pra raiz de POSTES UTILIZADOS automaticamente.
 """
 import csv
 import json
+import os
 import time
 import traceback
 
@@ -15,6 +16,7 @@ from pano import (
 )
 from routing import dest_dir_for, is_esquina
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MAPDATA = "mapdata.json"
 PITCH, FOV = 8, 80
 OUT_W, OUT_H = 1000, 1333
@@ -49,7 +51,7 @@ def load_candidates():
     D = json.load(open(MAPDATA, encoding="utf-8"))
     poles = {p[0]: p for p in D["poles"]}
     esquina_ids = set()
-    with open(r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\esquina_index.csv", encoding="utf-8-sig") as f:
+    with open(os.path.join(ROOT, "esquina_index.csv"), encoding="utf-8-sig") as f:
         for row in csv.DictReader(f, delimiter=";"):
             esquina_ids.add(row["cod_id"])
     regular_pending = [cid for cid in poles if cid not in esquina_ids and cid not in ALREADY_TOUCHED]
@@ -111,7 +113,7 @@ def main():
         if process_one(cod_id, p[3], p[4], p[5], log):
             n += 1
 
-    out_csv = r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\lote_teste_05_log.csv"
+    out_csv = os.path.join(ROOT, "lote_teste_05_log.csv")
     fields = ["cod_id", "endereco", "confianca", "pasta", "twin_edge", "wire_count",
               "hint_bearing", "yaw", "offset_centro_pct", "watermark_hits", "segundos", "resultado"]
     with open(out_csv, "w", newline="", encoding="utf-8-sig") as f:

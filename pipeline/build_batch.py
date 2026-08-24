@@ -1,10 +1,12 @@
 import csv
+import os
 import sys
 import json
 import math
 from pano import get_pano_meta
 
-CSV_PATH = r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\lista_postes.csv"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CSV_PATH = os.path.join(ROOT, "BASE DE DADOS", "lista_postes.csv")
 PROXIMITY_M = 8.0  # flag as ambiguous if another *real* pole (non-empty poste_numero) is within this distance
 
 

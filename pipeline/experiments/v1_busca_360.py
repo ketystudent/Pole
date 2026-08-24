@@ -9,6 +9,7 @@ decidir na revisao.
 """
 import csv
 import json
+import os
 import sys
 import time
 import traceback
@@ -19,8 +20,9 @@ from pano import (
 )
 from routing import dest_dir_for, is_esquina
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MAPDATA = "mapdata.json"
-INDEX_CSV = r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\esquina_index.csv"
+INDEX_CSV = os.path.join(ROOT, "esquina_index.csv")
 N_ESQUINA = 10
 N_REGULAR = 10
 PITCH, FOV = 8, 80
@@ -120,7 +122,7 @@ def main():
         if process_one(cod_id, p[3], p[4], p[5], "regular", log):
             n_reg += 1
 
-    out_csv = r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\lote_teste_01_log.csv"
+    out_csv = os.path.join(ROOT, "lote_teste_01_log.csv")
     fields = ["cod_id", "tipo", "endereco", "resultado", "pasta", "yaw", "offset_centro_pct", "watermark_hits", "segundos"]
     with open(out_csv, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")

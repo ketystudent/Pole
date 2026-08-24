@@ -2,12 +2,34 @@ import re
 import json
 import math
 import time
+import unicodedata
 import requests
 import numpy as np
 import cv2
 from io import BytesIO
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor
+
+_STREET_PREFIX_RE = re.compile(
+    r"^(RUA|AVENIDA|AV|R|PRACA|ALAMEDA|TRAVESSA|ESTRADA|RODOVIA|VIA|LARGO|BECO|ACESSO)\b\.?\s*"
+)
+
+
+def normalize_street_name(text):
+    """Mesma normalizacao usada em pipeline/export_map.py pro criterio de
+    esquina (base()): remove numero de casa, acento, tipo de logradouro
+    (RUA/AV/...) e pontuacao, deixa so o nome nu em maiusculo -- pra
+    comparar 'R. Pedro Dias de Carvalho' com 'RUA PEDRO DIAS DE CARVALHO
+    381, 381, SANTA TEREZINHA' e reconhecer que e a mesma rua."""
+    if not text:
+        return ""
+    s = text.split(",")[0]
+    s = re.sub(r"^\s*\d+\s+", "", s)  # numero de casa na frente (endereco do Google)
+    s = re.sub(r"\s+\d+\s*$", "", s)  # numero de casa no fim (endereco da base)
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().upper()
+    s = re.sub(r"[^A-Z0-9 ]", " ", s)
+    s = _STREET_PREFIX_RE.sub("", s)
+    return re.sub(r"\s+", " ", s).strip()
 
 HEADERS = {
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
@@ -39,7 +61,8 @@ def get_pano_meta(lat, lon):
         "!1m3!1e8!2b0!3e3!1m3!1e1!2b0!3e3!1m3!1e4!2b0!3e3!1m3!1e10!2b1!3e2!1m3!1e10!2b0!3e3!11m2!3m1!4b1"
     )
     r = _get_with_retry(META_URL, params={"authuser": "0", "hl": "en", "pb": pb})
-    text = r.text
+    text = r.content.decode("utf-8")  # r.text sozinho as vezes adivinha a
+    # codificacao errada e destroi acento (visto 23/ago com nomes de rua)
     if text.startswith(")]}'"):
         text = text[4:]
     data = json.loads(text)
@@ -67,6 +90,16 @@ def get_pano_meta(lat, lon):
     except Exception:
         pass
 
+    # endereco que o proprio Google mostra no cartao de info do Street View
+    # pra essa coordenada (achado 23/ago) -- mesma resposta, sem custo extra
+    # de request nem OCR. Usado pra cross-check de nome de rua contra o
+    # cod_id escolhido pelo match de distancia/rumo (ver README).
+    address = None
+    try:
+        address = pano_block[3][2][0][0]
+    except Exception:
+        pass
+
     return {
         "panoid": panoid,
         "levels": levels,  # index = zoom, value = [width, height] pixels
@@ -76,6 +109,7 @@ def get_pano_meta(lat, lon):
         "roll": roll,
         "lat": lat_actual,
         "lon": lon_actual,
+        "address": address,
     }
 
 
@@ -183,15 +217,59 @@ def score_pole_at_yaw(equirect_img, yaw_deg, fov_deg=70, size=300):
 
 
 def bearing_deg(lat1, lon1, lat2, lon2):
-    """Compass bearing (0=N, 90=E, ...) from point 1 to point 2. Google's raw
-    Street View equirectangular tiles are north-aligned, so this bearing lines
-    up (approximately -- GPS/position noise still applies) with the yaw_deg
-    parameter used throughout this module."""
+    """Compass bearing (0=N, 90=E, ...) from point 1 to point 2. This is a
+    true-north bearing -- it is NOT the same as the yaw_deg parameter used
+    elsewhere in this module. See yaw_from_bearing() below."""
     la1, la2 = math.radians(lat1), math.radians(lat2)
     dl = math.radians(lon2 - lon1)
     x = math.sin(dl) * math.cos(la2)
     y = math.cos(la1) * math.sin(la2) - math.sin(la1) * math.cos(la2) * math.cos(dl)
     return math.degrees(math.atan2(x, y)) % 360
+
+
+def yaw_from_bearing(bearing, pano_heading):
+    """Convert a true-north compass bearing into the yaw_deg parameter used by
+    equirect_to_perspective / score_pole_at_yaw / etc.
+
+    IMPORTANT (found 22/ago, calibrated against 3 links the user hand-aimed in
+    the real Google Maps UI and re-verified by screenshotting those exact
+    links in a real browser): Google's raw Street View equirectangular tiles
+    are NOT north-aligned. Pixel column x=0 corresponds to the panorama's own
+    recorded heading -- the compass direction the capture vehicle happened to
+    be facing -- not true north. Using a compass bearing directly as yaw_deg
+    (what this module did before) was confirmed wrong on all 3 calibration
+    links, off by the panorama's own heading value (39, 130 and 215 degrees
+    in those 3 cases) -- i.e. this was a systematic bug, not GPS noise.
+
+    pano_heading is meta['heading'] from get_pano_meta(). Falls back to the
+    raw bearing (old, wrong-but-harmless-default behavior) if heading is
+    unavailable for a given panorama."""
+    if pano_heading is None:
+        return bearing % 360
+    return (bearing - pano_heading) % 360
+
+
+def horizontal_fov_from_google_y(y_deg, out_w, out_h):
+    """Convert the 'y' value from a Google Maps Street View URL
+    (.../@lat,lon,3a,<y>y,<h>h,<t>t/...) into the horizontal fov_deg expected
+    by equirect_to_perspective.
+
+    IMPORTANT (found 22/ago, same calibration links as yaw_from_bearing):
+    Google's 'y' is a VERTICAL field of view, not horizontal. Treating it as
+    horizontal (this module's behavior before) reproduced the right *direction*
+    but rendered too narrow a vertical slice -- for a pole close to the camera
+    this visibly cut off the top of the pole, even though yaw/pitch were both
+    already correct. Confirmed by rendering both interpretations at the
+    user-supplied link's own aspect ratio and comparing against a real
+    browser screenshot of that exact link: the vertical-fov interpretation
+    matched pixel-for-pixel; the horizontal-fov one cropped the pole's top.
+
+    out_w/out_h should be the dimensions you're about to pass to
+    equirect_to_perspective (the vertical fov depends on aspect ratio)."""
+    aspect_hw = out_h / out_w
+    fov_v = math.radians(y_deg)
+    fov_h = 2 * math.atan(math.tan(fov_v / 2) / aspect_hw)
+    return math.degrees(fov_h)
 
 
 def auto_find_pole_yaw_constrained(equirect_img, hint_yaw, window_deg=55, coarse_step=8, fov_deg=70):

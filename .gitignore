@@ -1,0 +1,15 @@
+# Screenshots brutos e temporarios gerados a cada foto processada pelo
+# pipeline (pipeline/run_from_planilha.py) -- o resultado final ja fica em
+# "POSTES UTILIZADOS", esses aqui sao so rascunho intermediario.
+pipeline/planilha_raw_*.png
+
+# bytecode compilado do Python
+__pycache__/
+*.pyc
+
+# backups locais
+*.bak
+
+# zips redundantes -- copias compactadas de fotos que ja estao rastreadas
+# individualmente em POSTES UTILIZADOS (um deles passa do limite de 100MB do GitHub)
+zip/

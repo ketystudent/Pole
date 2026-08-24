@@ -35,12 +35,13 @@ def cleanup_prior(cod_id):
         for f in glob.glob(os.path.join(d, f"COD ID_{cod_id}*.jpg")):
             os.remove(f)
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MAPDATA = "mapdata.json"
 PITCH, FOV = 8, 80
 OUT_W, OUT_H = 1000, 1333
 WINDOW_DEG = 55
 
-PREV_LOG = r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\lote_teste_01_log.csv"
+PREV_LOG = os.path.join(ROOT, "lote_teste_01_log.csv")
 
 
 def load_batch():
@@ -122,7 +123,7 @@ def main():
         print(f"[{i}/{len(items)}] {cod_id} ({tipo}) ...", flush=True)
         process_one(cod_id, p[3], p[4], p[5], tipo, log)
 
-    out_csv = r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\lote_teste_03_log.csv"
+    out_csv = os.path.join(ROOT, "lote_teste_03_log.csv")
     fields = ["cod_id", "tipo", "endereco", "confianca", "resultado", "pasta", "twin_edge", "wire_count",
                "hint_bearing", "yaw", "offset_centro_pct", "watermark_hits", "segundos"]
     with open(out_csv, "w", newline="", encoding="utf-8-sig") as f:

@@ -5,6 +5,7 @@ os 360 graus inteiros. Objetivo: comparar a taxa de acerto antes/depois.
 """
 import csv
 import json
+import os
 import time
 import traceback
 
@@ -15,13 +16,14 @@ from pano import (
 )
 from routing import dest_dir_for, is_esquina
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MAPDATA = "mapdata.json"
 PITCH, FOV = 8, 80
 OUT_W, OUT_H = 1000, 1333
 WINDOW_DEG = 55
 
 # os mesmos 20 cod_id do lote 01 (le do log anterior pra nao digitar na mao)
-PREV_LOG = r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\lote_teste_01_log.csv"
+PREV_LOG = os.path.join(ROOT, "lote_teste_01_log.csv")
 
 
 def load_batch():
@@ -86,7 +88,7 @@ def main():
         print(f"[{i}/{len(items)}] {cod_id} ({tipo}) ...", flush=True)
         process_one(cod_id, p[3], p[4], p[5], tipo, log)
 
-    out_csv = r"c:\Users\ksenne\OneDrive - azureford\Desktop\Project\Pole\lote_teste_02_log.csv"
+    out_csv = os.path.join(ROOT, "lote_teste_02_log.csv")
     fields = ["cod_id", "tipo", "endereco", "resultado", "pasta", "hint_bearing", "yaw", "offset_centro_pct", "watermark_hits", "segundos"]
     with open(out_csv, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
