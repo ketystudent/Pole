@@ -384,9 +384,14 @@ def find_pole_x(arr):
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=80, minLineLength=int(h * 0.25), maxLineGap=15)
     if lines is None:
         return None
+    # opencv-python 5.x mudou o retorno do HoughLinesP de (N,1,4) pra (N,4)
+    # (achado 24/ago, rodando contra opencv 5.0.0 -- lines[:, 0, :] quebrava
+    # com "too many indices" assim que uma linha era encontrada); reshape
+    # normaliza os dois formatos sem custo (no-op no formato antigo).
+    lines = lines.reshape(-1, 4)
     cx = (LEFT_UI_EXCLUDE + RIGHT_UI_EXCLUDE) / 2
     best_score, best_mid = 0.0, None
-    for (x1, y1, x2, y2) in lines[:, 0, :]:
+    for (x1, y1, x2, y2) in lines:
         dx, dy = x2 - x1, y2 - y1
         length = math.hypot(dx, dy)
         if length < 1:
