@@ -2,6 +2,7 @@
 # pipeline (pipeline/run_from_planilha.py) -- o resultado final ja fica em
 # "POSTES UTILIZADOS", esses aqui sao so rascunho intermediario.
 pipeline/planilha_raw_*.png
+/planilha_raw_*.png
 
 # bytecode compilado do Python
 __pycache__/
@@ -11,5 +12,6 @@ __pycache__/
 *.bak
 
 # zips redundantes -- copias compactadas de fotos que ja estao rastreadas
-# individualmente em POSTES UTILIZADOS (um deles passa do limite de 100MB do GitHub)
+# individualmente em POSTES UTILIZADOS (alguns passam do limite de 100MB do GitHub)
 zip/
+*.zip
