@@ -34,7 +34,7 @@ from openpyxl.styles import Font
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
-from pano import get_pano_meta, normalize_street_name
+from pano import get_pano_meta, normalize_street_name, yaw_from_bearing
 from link_cleanup import remove_watermark_v3
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -52,8 +52,58 @@ LEFT_UI_EXCLUDE = 350
 RIGHT_UI_EXCLUDE = 2547 - 120
 OUT_W, OUT_H = 1000, 1333
 
-RE_MAIN = re.compile(r"@(-?\d+\.\d+),(-?\d+\.\d+),3a,([\d.]+)y,([\d.]+)h,([\d.]+)t")
-RE_PANOID = re.compile(r"!1s([A-Za-z0-9_-]{20,30})!2e0")
+RE_MAIN = re.compile(r"@(-?\d+\.\d+),(-?\d+\.\d+),\d+a,([\d.]+)y,([\d.]+)h,([\d.]+)t")
+# o "3a" logo apos lat/lon e' so um marcador fixo do Google (modo Street
+# View), nao carrega nenhum dado geografico -- aceitar \d+a em vez de so
+# "3a" (achado 26/ago: 210 linhas vieram com esse numero virando 959a/960a
+# etc., cara de arrasto de preenchimento automatico do Excel incrementando
+# um numero dentro do texto sem querer; o resto do link -- lat/lon/y/h/t/
+# panoid -- continua intacto e confiavel, so esse marcador que mudou)
+RE_PANOID = re.compile(r"!1s([A-Za-z0-9_-]{20,30})!2e\d+")
+RE_COORDS_ONLY = re.compile(r"@(-?\d+\.\d+),(-?\d+\.\d+)")
+RE_VIEWPOINT = re.compile(r"viewpoint=(-?\d+\.\d+),(-?\d+\.\d+)")
+
+
+def extrai_coords_fallback(candidatos):
+    """Procura coordenada em qualquer um dos candidatos (valor direto ou
+    hyperlink), nao so no primeiro -- e aceita tanto '@lat,lon' quanto
+    'viewpoint=lat,lon' (formato do link "generico" sem angulo, tipo o que
+    lista_postes.csv guarda em street_view_url). Achado 26/ago."""
+    for cand in candidatos:
+        if not cand:
+            continue
+        m = RE_COORDS_ONLY.search(cand) or RE_VIEWPOINT.search(cand)
+        if m:
+            return float(m.group(1)), float(m.group(2))
+    return None
+
+
+def link_candidates(cell):
+    """O Excel as vezes autolinca um texto colado (tipo o titulo da aba do
+    navegador, "436 R. Sao Luis - Google Maps") como hyperlink, guardando o
+    link de verdade em cell.hyperlink.target -- cell.value fica so com o
+    rotulo visivel, que o parse_link nunca reconhece. Achado 25/ago: 30
+    linhas na planilha tinham exatamente esse caso e ficavam marcadas "URL
+    nao reconhecida" pra sempre.
+
+    Em vez de escolher um dos dois cegamente, devolve as duas fontes
+    possiveis (valor direto primeiro, "caminho tradicional") pra quem chama
+    tentar cada uma e ficar com a que der certo -- pedido do usuario 25/ago,
+    pra nunca perder um link valido so por causa de qual caminho ele veio."""
+    candidates = []
+    if cell.value:
+        candidates.append(cell.value)
+    if cell.hyperlink and cell.hyperlink.target and cell.hyperlink.target not in candidates:
+        candidates.append(cell.hyperlink.target)
+    return candidates
+
+
+def cell_url(cell):
+    """Primeiro candidato disponivel (valor direto, senao hyperlink) -- usado
+    so onde a gente so precisa saber SE existe algum link na celula, nao
+    qual dos dois efetivamente parseia certo (isso e' link_candidates)."""
+    c = link_candidates(cell)
+    return c[0] if c else None
 
 
 def parse_link(url):
@@ -421,7 +471,7 @@ def main():
     pending = []
     full_row_by_cod = {}  # cod_id -> (linha, link, endereco) para QUALQUER linha ja processada
     for r in range(2, ws.max_row + 1):
-        url = ws.cell(row=r, column=col["link"]).value
+        url = cell_url(ws.cell(row=r, column=col["link"]))
         done = ws.cell(row=r, column=col["Processado?"]).value
         cod = ws.cell(row=r, column=col["cod_id"]).value
         if cod and cod not in full_row_by_cod:
@@ -453,14 +503,57 @@ def main():
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         for r in pending:
-            url = ws.cell(row=r, column=col["link"]).value
+            candidatos = link_candidates(ws.cell(row=r, column=col["link"]))
+            url = candidatos[0] if candidatos else None
             t0 = time.time()
             try:
-                L = parse_link(url)
+                # tenta cada candidato (valor direto = caminho tradicional,
+                # depois hyperlink) e fica com o primeiro que parsear certo
+                L = None
+                for cand in candidatos:
+                    L = parse_link(cand)
+                    if L is not None:
+                        url = cand
+                        break
                 if L is None:
-                    ws.cell(row=r, column=col["motivo"], value="URL nao reconhecida (nao tem 3a,Ny,Nh,Nt)")
+                    # fallback (achado 26/ago): o link pode ter coordenada
+                    # (@lat,lon) mas sem angulo/panoid valido -- link de
+                    # "viewpoint" generico (sem 3a/y/h/t) ou link quebrado
+                    # (falta o h, ou panoid veio vazio). Em vez de desistir,
+                    # so quando a coluna Poste confirma sem ambiguidade QUAL
+                    # poste mirar, reconstroi o angulo pelo rumo geometrico
+                    # ate esse poste (mesma logica de yaw_from_bearing que o
+                    # run_batch.py ja usa quando nao ha link nenhum) e monta
+                    # uma URL nova a partir do panoid fresco daquela
+                    # coordenada. Sem Poste preenchido nao tenta -- nao ha
+                    # como saber qual poste mirar sem angulo nem numero de
+                    # campo.
+                    coords_fb = extrai_coords_fallback(candidatos)
+                    poste_num_fb = ws.cell(row=r, column=col["Poste"]).value
+                    poste_num_fb = str(poste_num_fb).strip() if poste_num_fb not in (None, "") else None
+                    motivo_fallback = None
+                    if coords_fb and poste_num_fb and poste_num_fb in poste_map:
+                        lat_fb, lon_fb = coords_fb
+                        meta_fb = get_pano_meta(lat_fb, lon_fb)
+                        alvo_fb = next(((la, lo) for c, la, lo, a in poles if c == poste_map[poste_num_fb]), None)
+                        if meta_fb and meta_fb.get("lat") is not None and alvo_fb:
+                            bearing_fb = bearing_deg(meta_fb["lat"], meta_fb["lon"], alvo_fb[0], alvo_fb[1])
+                            yaw_fb = yaw_from_bearing(bearing_fb, meta_fb["heading"])
+                            url = (f"https://www.google.com/maps/@{lat_fb},{lon_fb},3a,80y,"
+                                   f"{yaw_fb:.2f}h,82t/data=!3m6!1e1!3m4!1s{meta_fb['panoid']}"
+                                   f"!2e0!7i16384!8i8192")
+                            L = {"lat": lat_fb, "lon": lon_fb, "y": 80.0, "h": yaw_fb, "t": 82.0,
+                                 "pitch": 90 - 82.0, "panoid": meta_fb["panoid"]}
+                            print(r, "RECONSTRUIDO via rumo geometrico (Poste %s)" % poste_num_fb)
+                        else:
+                            motivo_fallback = ("link sem angulo/panoid valido; tentei reconstruir pelo "
+                                                "Poste %s mas o Google nao tem cobertura Street View "
+                                                "nessa coordenada" % poste_num_fb)
+                if L is None:
+                    ws.cell(row=r, column=col["motivo"],
+                            value=motivo_fallback or "URL nao reconhecida (nao tem 3a,Ny,Nh,Nt)")
                     ws.cell(row=r, column=col["Processado?"], value="X")
-                    print(r, "PARSE FAIL")
+                    print(r, "PARSE FAIL" if not motivo_fallback else "PARSE FAIL (sem cobertura)")
                     continue
 
                 meta = get_pano_meta(L["lat"], L["lon"])
@@ -597,8 +690,17 @@ def main():
             except Exception as e:
                 ws.cell(row=r, column=col["motivo"], value="ERRO: %s" % e)
                 print(r, "ERRO", e)
-            # save incrementally so progress isn't lost if a later row fails hard
-            wb.save(PLANILHA)
+            finally:
+                # save incrementally so progress isn't lost if a later row fails
+                # hard -- precisa ser 'finally', nao so uma linha solta apos o
+                # try/except: os 'continue' de PARSE FAIL / SEM METADADOS estao
+                # dentro do try e pulavam direto pra proxima iteracao, nunca
+                # chegando a salvar essa linha em disco. Se as ultimas linhas da
+                # planilha caissem todas nesses ramos (sem nenhuma linha normal
+                # depois pra "carregar" o save pendente), o X+motivo delas
+                # ficava so na memoria e se perdia ao fechar o script (achado
+                # 25/ago, 8 linhas no fim da planilha nunca gravavam).
+                wb.save(PLANILHA)
 
         browser.close()
 
